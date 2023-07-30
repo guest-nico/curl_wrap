@@ -9,7 +9,8 @@ struct MemoryStruct {
 	size_t sizeHeader;
 	CURLcode ret;
 };
-static size_t WriteMemoryCallback(void *contents, size_t size, size_t nmemb, void *userp)
+static size_t
+WriteMemoryCallback(void *contents, size_t size, size_t nmemb, void *userp)
 {
 	size_t realsize = size * nmemb;
 	struct MemoryStruct *mem = (struct MemoryStruct *)userp;
@@ -34,20 +35,16 @@ static size_t header_callback(char *contents, size_t size,
 	size_t realsize = size * nmemb;
 	struct MemoryStruct *mem = (struct MemoryStruct *)userp;
 
-	char *ptr = (char*)realloc(mem->memoryHeader, mem->sizeHeader + realsize + 1);
+	char *ptr = (char*)realloc(mem->memory, mem->sizeHeader + realsize + 1);
 	if (!ptr) {
 		/* out of memory! */
 		printf("not enough memory (realloc returned NULL)\n");
 		return 0;
 	}
-
-	mem->memoryHeader = ptr;
-	memcpy(&(mem->memoryHeader[mem->sizeHeader]), contents, realsize);
-	mem->sizeHeader += realsize;
-	mem->memoryHeader[mem->sizeHeader] = 0;
-
+	
 	mem->memory = ptr;
 	memcpy(&(mem->memory[mem->size]), contents, realsize);
+	mem->sizeHeader += realsize;
 	mem->size += realsize;
 	mem->memory[mem->size] = 0;
 	
@@ -60,17 +57,17 @@ extern "C" int testInt(int i, int j) {
 extern "C" void memFree(void* p) {
 	free(p);
 }
-	
-extern "C" char* curl_get(char* url, char* method, char* sendData, int sendLen, int httpVer, int *num, int *headerNum, char* addHeader0, char* addHeader1, char* addHeader2, char* addHeader3, char* addHeader4, char* addHeader5, char* addHeader6, char* addHeader7, char* addHeader8, char* addHeader9, char* addHeader10, char* addHeader11) {
+
+extern "C" char* curl_get(char* url, char* method, char* sendData, int sendLen, int httpVer, int *num, int *headerNum, bool isFollowLocation, char* addHeader0, char* addHeader1, char* addHeader2, char* addHeader3, char* addHeader4, char* addHeader5, char* addHeader6, char* addHeader7, char* addHeader8, char* addHeader9, char* addHeader10, char* addHeader11) {
 	char* ret = (char*)"";
 	CURL *data = curl_easy_init();
 	
 	curl_easy_setopt(data, CURLOPT_URL, url);
-	curl_easy_setopt(data, CURLOPT_FOLLOWLOCATION, 1);
+	curl_easy_setopt(data, CURLOPT_FOLLOWLOCATION, isFollowLocation ? 1 : 0);
 	curl_easy_setopt(data, CURLOPT_SSL_VERIFYPEER, 0);
 	curl_easy_setopt(data, CURLOPT_HTTP_VERSION, httpVer);
 	curl_easy_setopt(data, CURLOPT_TIMEOUT, 20);
-	
+
 	struct curl_slist *list = NULL;
 	if (addHeader0 != NULL && strcmp(addHeader0, "") != 0)
 		list = curl_slist_append(list, addHeader0);
@@ -103,15 +100,18 @@ extern "C" char* curl_get(char* url, char* method, char* sendData, int sendLen, 
 	
 	chunk.memory = (char*)malloc(1);
 	chunk.size = 0;
-	chunk.memoryHeader = (char*)malloc(1);
 	chunk.sizeHeader = 0;
-	
+
 	curl_easy_setopt(data, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
 	curl_easy_setopt(data, CURLOPT_WRITEDATA, (void *)&chunk);
 	
 	curl_easy_setopt(data, CURLOPT_HEADERFUNCTION, header_callback);
 	curl_easy_setopt(data, CURLOPT_HEADERDATA, (void *)&chunk);
 	
+	//char errbuf[CURL_ERROR_SIZE];
+	//curl_easy_setopt(data, CURLOPT_ERRORBUFFER, errbuf);
+	//errbuf[0] = 0;
+
 	if (strcmp(method, "GET") == 0) {
 		curl_easy_setopt(data, CURLOPT_HTTPGET, 1L);
 	}
@@ -121,18 +121,20 @@ extern "C" char* curl_get(char* url, char* method, char* sendData, int sendLen, 
 		curl_easy_setopt(data, CURLOPT_POSTFIELDSIZE, sendLen);
 	}
 	curl_easy_setopt(data, CURLOPT_CUSTOMREQUEST, method);
-	
-	CURLcode res = curl_easy_perform(data);
-	
-	if (res != CURLE_OK) {
-		return ret;
-	}
 
-	curl_easy_cleanup(data);
+	CURLcode res = curl_easy_perform(data);
 
 	*num = chunk.size;
 	*headerNum = chunk.sizeHeader;
+	if (res != CURLE_OK) {
+		curl_easy_cleanup(data);
+		curl_slist_free_all(list);
+		num = 0;
+		headerNum = (int*)res;
+		return chunk.memory;
+	}
+
+	curl_easy_cleanup(data);
 	curl_slist_free_all(list);
-	
 	return chunk.memory;
 }
